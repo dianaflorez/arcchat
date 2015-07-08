@@ -1,0 +1,516 @@
+<!-- Copyright (c) 2007-2012, Kaazing Corporation. All rights reserved. -->
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Nuchat</title>
+
+    <script src="lib/jquery-1.3.2.min.js"></script>
+    
+    <script src="lib/WebSocket.js"></script> 
+    <script src="lib/StompClient.js"></script> 
+    <script src="lib/nuchatadmin.js"></script>
+ 
+    <script src="XmppClient.js"></script>
+
+    <!--<script src="lib/ByteSockets.js"></script> -->
+    
+    <link type="text/css" href="css/estilo2.css" rel="stylesheet" id="linkestiloa">
+    <!--<link rel="stylesheet" type="text/css" href="css/mainadmin.css">-->
+
+  </head>
+<body oncontextmenu="return false;" onunload="alert('siii')">
+<div id="divnumeros" style="margin: 10px; left:10px;  width:300px; border: solid #000 0px; display:none"> 
+</div>
+
+<div id="console" class="panel"><h4 class="line headertitle">Usuarios en espera</h4></div>
+<div id="consolechat">
+	<div id="consolemsg" class="panelchat"></div>
+
+	<div id="login_box" class="panelchat">
+	    
+	    <input type="hidden" id="usernamea" value="" />
+	    <input type="hidden" id="passworda" value="" />
+	    <button onClick="gui_connect()" class="noopen">Connect</button>
+	    
+	    <input type="hidden" value="" id="recipient"/>
+	    <br/>
+	    <span class="prompt">Mensaje:</span><br />
+	    <textarea rows="2" cols="70" maxlength="170" id="body" onkeyup="Textarea_Sin_Enter(event.keyCode, event.which, 'body')">Bienvenido... </textarea>
+	    <br />
+	    <table>
+	    	<tr>
+	    		<td >
+	    			<div class="btn">
+<button onClick="gui_send()" class="btnint" id="btnsend" disabled>Enviar Mensaje</button>
+	    			</div>
+					
+	    		</td>
+	    		<td>
+	    			<div class="btn">
+	    			<button onClick="desconectar()" class="btnint">Terminar sesion</button>	
+	    			</div>
+	    		</td>
+	    	</tr>
+	    </table>
+	    
+	</div>
+
+</div>
+
+<div id="rosternow" class="panel">
+    <h4 class="line headertitle">Contactos Activos</h4>
+</div>
+
+
+<input type="hidden" id="funcionarios" value="sean/seanf/sidarta" /> 
+
+<div id="roster" class="panel">
+
+    <h4 class="line headertitle">Lista de Contactos</h4>
+    <span class="prompt">My status:</span>
+    <input type="text" value="Online" id="status"/>
+    <button onClick="gui_setStatus()">Set Status</button>
+    <hr/>
+    <span class="prompt">My availability:</span>
+    <select onChange="gui_setStatus()" id="availability">
+        <option>Available</option>
+        <option>Away</option>
+        <option>Offline</option>
+    </select>
+</div>
+
+<script>
+    var server = window.location.host;
+	var  client;
+	var  contactList = [];
+	       
+	//  Hard-coded reference to the WebSocket server  (for  simplicity)
+	//var  url = "ws://localhost:8001/jabber";
+	var  url = "ws://"+server+"/jabber";
+	       
+	//  Hard-coded value of the "resource"  (for  simplicity)
+	var  resource = 'spark';
+	       
+	//  Name of the remote server, derived from the roster list
+	var  chatserver;
+	       
+	//  Add a logging message to the window
+	var  log = function(s,cons,username) {
+        
+	    var  output = document.getElementById(cons);
+	    var idu = "";
+	    if(username == "yaexiste"){
+			output.innerHTML =  output.innerHTML + "<p  class='line' >" + s + "</p>" ;
+			output.lastChild.scrollIntoView();
+		}else{		    	
+		    if (username != "nou"){
+		    	idu = "id='"+ cons + username + "'";
+		    }
+
+		    output.innerHTML = output.innerHTML + "<div  class='line' "+ idu +">" + s + "</div>";
+		}	
+
+
+
+	}
+	//  Set the status and availability of this user
+	var  gui_setStatus = function() {
+	    var  s = document.getElementById('status').value;
+	    var  a = document.getElementById('availability').value.toLowerCase();
+	    client.setStatus(s, a);
+	}
+	       
+	//  Utility method for escaping out XML characters
+	var  gui_xescape = function(s) {
+	    return  s.replace("&", "&amp;", "g")
+	    .replace("<", "&lt;", "g")
+	    .replace(">", "&gt;", "g")
+	}
+
+<!-- TODO3 -->
+	// Register a callback for receiving the roster, then fetch it
+	var  gui_getRoster = function() {
+	    var  rosterCallback = function(roster) {
+	        contactList = roster;
+	        gui_updateRoster();
+	    }
+	    client.getRoster(rosterCallback);
+	}
+
+<!-- TODO4 -->
+	// Update the roster list with incoming contacts
+	var gui_updateRoster = function() {
+	    var r = document.getElementById("roster");
+	    var s = "<h4 class='line headertitle'>Usuarios Conectados</h4>";
+	    var entity;
+	         
+	    for (var i=0; i<contactList.length; i++) {
+	        entity = contactList[i];
+	        var shortName = entity.jid.split('@')[0];
+	        if (chatserver == null) {
+	            chatserver = entity.jid.split('@')[1].split('/')[0];
+	        }
+	         
+	        s += "<div class=entity>" + shortName 
+	        + (entity.status ? "<div class=status>"
+	        + entity.status +"</div>": "") 
+	        + (entity.show ? "<div class=show>"
+	        + entity.show +"</div>" : "") + "</div>";
+	    }
+	    r.innerHTML = s;
+	}
+
+<!-- TODO5 -->
+	//  Format an incoming message for display in the UI
+	//  c is the sender class
+	var  gui_format_msg = function(sender, body, c, withl) {
+        
+	    sender  = sender.split('@')[0];
+
+		var d = new Date();
+		var hora = "("+d.getHours()+":"+d.getMinutes()+")";
+	    if(withl == "yes"){
+	    	
+	    	func = "agregardiv('" + sender + "')";
+	    	return  "<div onclick=" + func + " class='conlink' ><b class=" + c + ">" + sender + hora + ":  </b>"  
+	         + gui_xescape(body) + "</div>";	
+	    }else{
+	    	return  "<b class=" + c + ">" + sender +  hora + ":  </b>"
+	    	+ gui_xescape(body) ;
+	    }
+	}
+    
+<!-- TODO6 -->
+	// Send a message to a chat user
+	var gui_send = function() {
+		var bd = document.getElementById('body').value;
+		
+		if(bd != ""){  
+		    var j = document.getElementById('recipient').value;
+		        
+		    // Restore the full name of the recipient
+		    if(chatserver==undefined) chatserver = "localhost"; //XQ no se ha definido en el grupo de roster es undefined
+		    j += '@' + chatserver + '/' + resource;
+		    
+			// Send the message in the body element
+		    var b = document.getElementById('body').value;
+		    client.sendMessage(j, b);
+		         
+		    var u = document.getElementById('usernamea').value;
+
+		    var consola = "noconsole";
+	    	var withlink = "yes";
+	        var	sender = document.getElementById('recipient').value;
+
+			//If the user is in a chat conversation actived
+	        var divs = document.getElementById("consolemsg").getElementsByTagName("div");
+	        var swuseractived = 0;
+			for(var i = 0; i < divs.length; i++){
+			   	if(divs[i].id == "cm"+sender){
+			   		swuseractived = 1;
+			   	}
+			}
+
+	    	if(swuseractived == 1){
+	    		consola = "cm"+sender;
+	    		withlink = "no";
+	    		stylemsg = "them";
+	    		sender = "yaexiste";
+	    	}
+
+	    	if(consola != "noconsole"){
+			    log(gui_format_msg(u, b, "me", withlink), consola, sender);
+			}
+
+		    document.getElementById('body').value = "";
+		    document.getElementById('body').focus();
+		}
+	}
+
+<!-- TODO7 -->
+	// Send in the authentication credentials
+	var gui_auth = function() {
+	    var u = document.getElementById('usernamea').value;
+	    var p = document.getElementById('passworda').value;
+	    credentials = {};
+	    credentials.password = p;
+	         
+	    // Add localhost to the username to correct the server
+	    // identification 
+	    credentials.username = u + '@localhost';
+	         
+	    client.authenticate(credentials);
+	}
+
+<!-- TODO8 -->
+	var gui_connect = function() {
+	    client = new XmppClient();
+	       
+	    // Once connected, start authentication
+	    client.onopen = function() {
+	        log("<span class='msgalertverde'>Conectado al sistema...</span>","console", "nou");
+
+	         $("span").fadeOut(1);
+	         $("span").fadeIn(1000);
+
+	        gui_auth();
+	    }
+	       
+	    // Once authenticated, bind to the correct resource,
+	    // get the roster of buddies, and set my status
+	    client.onauthenticated = function() {
+	        client.bind(resource);
+	        gui_getRoster();
+	        gui_setStatus();
+	    }
+	       
+	    client.onclose = function() {
+	        log("<span class='msgalertrojo'>Desconectado.</span>","console", "nou");
+
+	        $("span").fadeOut(1);
+	         $("span").fadeIn(1000);
+	    }
+	       
+	    // Got a message from the server... display it
+	    client.onmessage = function(msg) {
+            var consola = "console";
+	    	var withlink = "yes";
+	    	var stylemsg = "themlink";
+     
+            var sender = msg.from;
+            sender  = sender.split('@')[0]; 
+            senderaux = sender;   
+            //If the user is in a chat conversation actived
+            var divs = document.getElementById("consolemsg").getElementsByTagName("div");
+            var swuseractived = 0;
+			for(var i = 0; i < divs.length; i++){
+			   	if(divs[i].id == "cm"+sender){
+			   		swuseractived = 1;
+			   	}
+			}
+
+			//If the user is in console
+            var divcons = document.getElementById("console").getElementsByTagName("div");
+            var swuserconsola = 0;
+			for(var i = 0; i < divcons.length; i++){
+			   	if(divcons[i].id == "console"+sender){
+			   	   swuserconsola = 1;
+			   	}
+			}
+
+	    	if(swuseractived == 1){
+	    		consola = "cm"+sender;
+	    		withlink = "no";
+	    		stylemsg = "them";
+	    		//Before send change
+	    		document.getElementById("rn"+sender).style.color = "#FF712C";
+	    		sender = "yaexiste";
+	    		
+	    	}
+            
+            //verify msg If is maybe the other func
+            if(swuserconsola!=1){
+	    		swuserconsola = verifymsg(msg.body);
+		    	if(swuserconsola == 2){
+		    		consola = "console";
+		    		msg.body = "Usuario inicio sesion";
+		    		withlink = "yes";
+		    	    stylemsg = "themlink";
+		    	    sender = senderaux;
+		    		
+		    	}
+	    	}
+	 
+            if(swuserconsola != 1){
+	        	log(gui_format_msg(msg.from, msg.body, stylemsg, withlink),consola, sender);
+	        }
+	    }
+	       
+	    client.onerror = function(e) {
+	        log("<span style='color:red'>" + e + "</span>","console", "nou");
+	    }
+	       
+	    client.onpresence = function(p) {
+	        var rosterName = p.from.slice(0, p.from.indexOf("/"));
+	        for (var i=0; i<contactList.length; i++) {
+	            if (contactList[i].jid === rosterName) {
+	                contactList[i].status = p.status;
+	                contactList[i].show = p.show;
+	            }
+	            gui_updateRoster();
+	        }
+	    }
+
+<!-- TODO9 -->
+	// Now, connect to the chat server
+	client.connect(url, "localhost")
+	
+}
+//Add divs in consolemsg ADD ROOMS
+function agregardiv(sender)
+{
+	//Desactivar other click
+    document.getElementById("console"+sender).disabled = true;
+
+	var element = document.getElementById("console"+sender);
+	element.parentNode.removeChild(element);
+
+	//I need send a msg to delete users in the other roster of the other agents
+    deleteuser(sender); 
+
+	$("#recipient").val(sender);
+
+	$("#consolemsg").append("<div class='consolenewt ' id='cmt"+ sender+"' ><h4 class='line headertitle'>Usuario..."+ sender +"</h4></div>");
+	
+	$("#consolemsg").append("<div class='consolenew panel' id='cm"+ sender+"' ></div>");
+
+	var func = "selectroom('"+ sender +"')";
+	var idrn = "rn" + sender;
+	sender = sender.charAt(0).toUpperCase() + sender.slice(1);
+
+    //Activar envio de mensajes
+    document.getElementById("btnsend").disabled = false;
+
+	$("#rosternow").append("<div class='conlink colrn'  id="+ idrn +" onclick=" + func + " >"+ sender + "</div>");
+	
+	
+    document.getElementById("btnsend").style.display = "block";
+}
+
+function selectroom(sender){
+	//$('#cmsender').slideDown('slow');
+//	$('#cm'+sender).slideUp('slow');
+
+	var divs = document.getElementById("consolemsg").getElementsByTagName("div");
+	for(var i = 0; i < divs.length; i++){
+	   	divs[i].style.display = "none";
+	}
+	document.getElementById("cm"+sender).style.display = "block";
+	document.getElementById("cmt"+sender).style.display = "block";
+	document.getElementById("rn"+sender).style.color = "#242400";
+	$("#recipient").val(sender);
+}
+
+function desconectar(){
+        //If the user is in a chat conversation actived
+        var divs = document.getElementById("consolemsg").getElementsByTagName("div");
+        for(var i = 0; i < divs.length; i++){
+			sender = divs[i].id;
+            sender  = sender.split('cmt')[1];
+
+			var j = sender;
+			if(j != undefined)
+		  
+		    // Restore the full name of the recipient
+		    j += '@' + chatserver + '/' + resource;
+		         
+		    // Send the message in the body element
+		    var b = "Muchas gracias. El funcionario a terminado la session";
+		    client.sendMessage(j, b);
+	       	
+		}
+		client.disconnect();
+		//Enviar otra pagina.....
+        parent.reload();
+
+}
+
+//If the "funcionario" choose a user This user is delete for the other "funcionarios"
+function deleteuser(sender){
+	if (!chatserver) chatserver = "localhost";
+	var funcionario = document.getElementById('funcionarios').value;
+	if(funcionario){
+        
+        funcionario = funcionario.split('/');
+
+        for (var i = 0; i < funcionario.length; i++) {
+           	j = funcionario[i];
+
+			 // Restore the full name of the funcionario
+		    j += '@' + chatserver + '/' + resource;
+		
+		    // Send the message in the body element
+		    var b = "nuchatcod007="+sender;
+		    
+		    client.sendMessage(j, b);
+        }; 
+	}
+}
+
+function verifymsg(msg){
+	var cadena = msg;
+	//delete user that is atended by other func.
+	var buscar = "nuchatcod007=";
+	//first msg for user
+	var buscarfm = "nuchatcod001=";
+	
+    if (cadena.indexOf(buscar)==0) {
+        //delete user of the roster because other user selected this user 
+        var sender = msg.split("=")[1];
+        var element = document.getElementById("console"+sender);
+        if(element) element.parentNode.removeChild(element);
+
+    	return 1;
+	}
+
+    if (cadena.indexOf(buscarfm)==0) {
+    	var sender = msg.split("=")[1];
+       
+        var element = document.getElementById("rn"+sender);
+        if(element){
+	    	element.parentNode.removeChild(element);
+	    }
+	    element = document.getElementById("cm"+sender);
+        if(element)
+	    element.parentNode.removeChild(element);	
+
+		var rp = document.getElementById('recipient').value;
+
+		if (rp == sender) document.getElementById('recipient').value = "";
+
+    	return 2;
+	}
+
+	return 0;
+}
+
+function Textarea_Sin_Enter($char, $mozChar, $id){
+   //alert ($char+" "+$mozChar);
+   $textarea = document.getElementById($id);
+   niveles = -1;
+    
+   if($mozChar != null) { // Navegadores compatibles con Mozilla
+       if($mozChar == 13){
+           if(navigator.appName == "Opera") niveles = -2;
+           $textarea.value = $textarea.value.slice(0, niveles);
+           gui_send();
+       }
+   // navegadores compatibles con IE
+   } else if($char == 13){ 
+   		$textarea.value = $textarea.value.slice(0,-2);
+   		gui_send();
+   	}
+   
+}
+
+/*
+
+
+window.onbeforeunload = function (e) {
+  var e = e || window.event;
+  //IE & Firefox
+  if (e) {
+    e.returnValue = 'Are you sure?';
+  }
+  // For Safari
+  return 'Are you sure?';
+  
+  alert("noo");
+};
+*/
+
+</script>
+	
+</body>
+</html>
